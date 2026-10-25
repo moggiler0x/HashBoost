@@ -7,7 +7,7 @@ name = "hashboost"
 version = "0.1.0"
 description = "Авто-андервольтинг, разгон и оптимизация доходности видеокарт с учётом цены электроэнергии"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.15"
 dependencies = [
     "PySide6>=6.6",
     "pyqtgraph>=0.13.3",
