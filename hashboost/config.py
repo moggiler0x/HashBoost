@@ -129,6 +129,8 @@ def data_dir() -> Path:
         path = Path(override)
     elif sys.platform == "win32":
         path = Path(os.environ.get("APPDATA", Path.home())) / "HashBoost"
+    elif sys.platform == "darwin":
+        path = Path.home() / "Library" / "Application Support" / "HashBoost"
     else:
         path = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hashboost"
     path.mkdir(parents=True, exist_ok=True)

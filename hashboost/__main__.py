@@ -28,8 +28,8 @@ def main(argv=None) -> int:
                         handlers=[logging.StreamHandler(), logging.FileHandler(data_dir() / "hashboost.log",
                                                                                 encoding="utf-8")])
     cfg = load_config()
-    if args.simulate:
-        cfg.simulate = True
+    if args.simulate or sys.platform == "darwin":
+        cfg.simulate = True  # на macOS доступна только симуляция
     if args.algorithm:
         cfg.miner.algorithm = args.algorithm
 

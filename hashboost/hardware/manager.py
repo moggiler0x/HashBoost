@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from dataclasses import dataclass, field
 
@@ -67,6 +68,11 @@ class Rig:
 
 def detect_backends(simulate: bool = False, mhz_per_mv: float = 1.2, clock=None):
     """Возвращает (список backend'ов, симулятор или None)."""
+    if sys.platform == "darwin":
+        # На macOS нет драйверов NVML/ADL для управления картами: доступна только симуляция
+        if not simulate:
+            log.info("macOS: управление видеокартами недоступно, запускаю режим симуляции")
+        simulate = True
     if not simulate:
         backends: list[GpuBackend] = []
         from .nvml_backend import NvmlBackend, nvml_available
