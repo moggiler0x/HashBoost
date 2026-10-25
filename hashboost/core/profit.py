@@ -51,7 +51,8 @@ class ProfitEngine:
         return gpu_power_w / max(self.cfg.psu_efficiency, 0.01)
 
     def cost_per_day(self, gpu_power_w: float) -> float:
-        return self.wall_power(gpu_power_w) * HOURS_PER_DAY / 1000 * self.cfg.tariff_per_kwh
+        """Свет за сутки круглосуточной работы; при двухтарифном счётчике — по средней цене дня и ночи."""
+        return self.wall_power(gpu_power_w) * HOURS_PER_DAY / 1000 * self.cfg.effective_tariff()
 
     def revenue_per_day(self, algorithm: str, hashrate: float) -> float:
         algo = self.cfg.algorithm(algorithm)
@@ -61,6 +62,12 @@ class ProfitEngine:
     def evaluate(self, algorithm: str, hashrate: float, gpu_power_w: float) -> ProfitBreakdown:
         return ProfitBreakdown(self.revenue_per_day(algorithm, hashrate), self.cost_per_day(gpu_power_w),
                                self.wall_power(gpu_power_w))
+
+    def night_only(self, total: ProfitBreakdown) -> ProfitBreakdown:
+        """Тот же риг, но работающий только в ночную зону двухтарифного счётчика."""
+        hours = self.cfg.night_hours
+        return ProfitBreakdown(total.revenue_per_day * hours / HOURS_PER_DAY,
+                               total.wall_power_w * hours / 1000 * self.cfg.tariff_night, total.wall_power_w)
 
     def rig_total(self, items: Iterable[tuple[str, float, float]]) -> ProfitBreakdown:
         """Итог по ригу: сумма по картам плюс потребление платформы."""
@@ -91,6 +98,15 @@ class ProfitEngine:
         tolerance = abs(top) * 0.005
         near = [s for s in stable if s.net_per_day >= top - tolerance]
         return min(near, key=lambda s: s.power_w)
+
+
+def payback_days(price: float, net_per_day: float) -> Optional[float]:
+    """Сколько дней карта отбивает свою цену чистой прибылью. ``None`` — не окупится."""
+    if price <= 0:
+        return 0.0
+    if net_per_day <= 0:
+        return None
+    return price / net_per_day
 
 
 def fetch_revenue(algo: AlgorithmConfig, timeout: float = 10.0) -> float:

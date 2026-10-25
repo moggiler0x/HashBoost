@@ -46,18 +46,27 @@ class SimGpuSpec:
     thermal_c_per_w: float = 0.35
 
 
+# Демо-риг повторяет риги автора (скрины Kryptex 5.10.7 от 25.10.2026): RTX 4060 и GTX 1650 на одном,
+# две GTX 1660 SUPER и RX 570 на другом. Хешрейт на стоке — из справочника Kryptex (core/market.py),
+# потребление — типичное для платы. Проверка модели по реальным замерам: GTX 1660 SUPER на 1500/6801 МГц
+# в PeakMiner даёт 138 MH/s на qtc при 66–72 Вт — симулятор на тех же частотах выдаёт столько же
+# (см. tests/test_real_data.py). PearlHash упирается в тензорные ядра: у Turing (GTX 16xx)
+# их нет, отсюда 1 TH/s против 65 TH/s у RTX 4060; Polaris (RX 570) его не майнит вовсе.
 DEMO_RIG = [
     SimGpuSpec("NVIDIA GeForce RTX 4060", 2460, 8500, 115, 1050, 18, 80, 17,
-               {"poseidon2": AlgoPerf(310e6, 0.92, 0.08), "pearlhash": AlgoPerf(41e6, 0.45, 0.55)},
+               {"poseidon2": AlgoPerf(278e6, 0.92, 0.08), "pearlhash": AlgoPerf(65e12, 0.85, 0.15)},
                uv_headroom_mv=110, mem_headroom_mhz=1200),
-    SimGpuSpec("NVIDIA CMP 30HX", 1785, 7000, 125, 1000, 22, 80, 23,
-               {"poseidon2": AlgoPerf(190e6, 0.92, 0.08), "pearlhash": AlgoPerf(30e6, 0.45, 0.55)},
-               uv_headroom_mv=85, mem_headroom_mhz=700),
-    SimGpuSpec("NVIDIA GeForce GTX 1660 SUPER", 1830, 7000, 125, 1043, 20, 82, 23,
-               {"poseidon2": AlgoPerf(175e6, 0.92, 0.08), "pearlhash": AlgoPerf(28e6, 0.45, 0.55)},
+    SimGpuSpec("NVIDIA GeForce GTX 1650", 1665, 6000, 75, 1000, 10, 46, 14,
+               {"poseidon2": AlgoPerf(103e6, 0.92, 0.08), "pearlhash": AlgoPerf(0.65e12, 0.85, 0.15)},
+               uv_headroom_mv=80, mem_headroom_mhz=500),
+    SimGpuSpec("NVIDIA GeForce GTX 1660 SUPER", 1830, 7000, 125, 1043, 12, 78, 20,
+               {"poseidon2": AlgoPerf(164e6, 0.92, 0.08), "pearlhash": AlgoPerf(1.0e12, 0.85, 0.15)},
                uv_headroom_mv=70, mem_headroom_mhz=900),
-    SimGpuSpec("AMD Radeon RX 570", 1244, 1750, 150, 1150, 30, 95, 25,
-               {"poseidon2": AlgoPerf(120e6, 0.9, 0.1), "pearlhash": AlgoPerf(24e6, 0.4, 0.6)},
+    SimGpuSpec("NVIDIA GeForce GTX 1660 SUPER", 1830, 7000, 125, 1043, 12, 78, 20,
+               {"poseidon2": AlgoPerf(164e6, 0.92, 0.08), "pearlhash": AlgoPerf(1.0e12, 0.85, 0.15)},
+               uv_headroom_mv=95, mem_headroom_mhz=700),
+    SimGpuSpec("AMD Radeon RX 570", 1244, 1750, 150, 1150, 30, 75, 25,
+               {"poseidon2": AlgoPerf(70e6, 0.9, 0.1)},
                uv_headroom_mv=120, mem_headroom_mhz=200, vendor_label="AMD"),
 ]
 
@@ -128,8 +137,8 @@ class SimulatedRig:
         deficit = (v_stock(core) - sp.uv_headroom_mv) - voltage
         mem_excess = st.mem_offset_mhz - sp.mem_headroom_mhz
 
-        perf = sp.algos.get(self.algorithm) or next(iter(sp.algos.values()))
-        factor = (core / sp.stock_core) ** perf.core_weight * (mem / sp.stock_mem) ** perf.mem_weight
+        perf = sp.algos.get(self.algorithm)
+        factor = (core / sp.stock_core) ** perf.core_weight * (mem / sp.stock_mem) ** perf.mem_weight if perf else 0.0
 
         errors = 0.0
         if deficit > 0:
@@ -161,7 +170,9 @@ class SimulatedRig:
                 gpu.rejected += dt / 2400.0
 
     def _hashrate(self, gpu: _GpuState, op: _Operating) -> float:
-        perf = gpu.spec.algos.get(self.algorithm) or next(iter(gpu.spec.algos.values()))
+        perf = gpu.spec.algos.get(self.algorithm)
+        if perf is None:  # карта не поддерживает алгоритм: майнер её пропускает
+            return 0.0
         noise = 1.0 + self._rng.uniform(-0.004, 0.004)
         error_penalty = max(0.0, 1.0 - op.errors_per_min * 0.01)
         return perf.base_hashrate * op.hashrate_factor * noise * error_penalty

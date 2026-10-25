@@ -26,7 +26,8 @@ def create_miner(cfg: MinerConfig, sim_rig=None) -> tuple[MinerClient, MinerCont
         client = GenericJsonClient(cfg.api_url, cfg.json_map)
     else:
         client = SrbMinerClient(cfg.api_url)
-    controller = MinerProcess(cfg.executable, cfg.args) if cfg.executable else ExternalMiner()
+    args = cfg.algo_args.get(cfg.algorithm) or cfg.args
+    controller = MinerProcess(cfg.executable, args) if cfg.executable else ExternalMiner()
     return client, controller
 
 
