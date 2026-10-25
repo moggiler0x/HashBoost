@@ -19,3 +19,11 @@ jobs:
       - run: pytest -q
         env:
           QT_QPA_PLATFORM: offscreen
+
+  mac-launcher:
+    # Скрипт запуска для Mac сам готовит окружение с нуля и запускает программу
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/HashBoost-mac.command --version
+      - run: ./scripts/HashBoost-mac.command --version  # повторный запуск без переустановки

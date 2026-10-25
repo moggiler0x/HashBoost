@@ -26,7 +26,8 @@ def main(argv=None) -> int:
     if sys.version_info[:2] >= (3, 15):
         # Для новых версий Python ещё нет готовых сборок numpy и Qt: падение будет непонятным
         print(f"HashBoost пока работает на Python 3.10–3.14, а запущен на {sys.version.split()[0]}.\n"
-              "Установите Python 3.13 и пересоздайте окружение (подробности в README).", file=sys.stderr)
+              "На Mac запустите scripts/HashBoost-mac.command: он сам поставит подходящий Python.\n"
+              "Иначе установите Python 3.13 и пересоздайте окружение (подробности в README).", file=sys.stderr)
         return 1
     args = parse_args(argv)
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s",
