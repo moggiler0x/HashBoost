@@ -26,7 +26,21 @@ def test_main_window_in_simulation():
             window.refresh()
             app.processEvents()
         assert runtime.simulated
-        assert len(window.dashboard.cards) == 4
+        assert len(window.dashboard.cards) == 5
+
+        calc = window.calculator
+        calc.mode.setCurrentIndex(1)  # двухтарифный
+        assert runtime.cfg.tariff_mode == "dual"
+        assert runtime.cfg.effective_tariff() < runtime.cfg.tariff_day
+        calc.refresh(runtime.poll_once())
+        assert "Только ночью" in calc.night_only.text()
+        assert calc.advice.item(0, 1).text() == "Pearl"  # RTX 4060
+        assert calc.advice.item(2, 1).text() == "Quantus"  # GTX 1660 SUPER
+        calc.advice.item(0, 5).setText("20000")
+        assert runtime.cfg.card_prices[runtime.rig[0].info.uid] == 20000
+        calc.preset.setCurrentIndex(2)
+        assert runtime.cfg.tariff_day == 10.11
+        assert window.lab.mode_box.count() == 2
         window.close()
     finally:
         runtime.shutdown()

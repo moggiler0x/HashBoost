@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-                               QPushButton, QSpinBox, QVBoxLayout, QWidget)
+                               QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from ..config import save_config
 from ..core.runtime import Runtime
@@ -17,6 +17,16 @@ def ispin(minimum: int, maximum: int, suffix: str = "", step: int = 1) -> QSpinB
     if suffix:
         box.setSuffix(suffix)
     return box
+
+
+def parse_algo_args(text: str) -> dict[str, str]:
+    """Строки вида «алгоритм: аргументы» → словарь."""
+    result = {}
+    for line in text.splitlines():
+        name, sep, args = line.partition(":")
+        if sep and name.strip() and args.strip():
+            result[name.strip()] = args.strip()
+    return result
 
 
 class SettingsView(QWidget):
@@ -43,6 +53,13 @@ class SettingsView(QWidget):
         f.addRow("Исполняемый файл", self.exe)
         f.addRow("Аргументы", self.args)
         f.addRow("Алгоритм", self.algorithm)
+        self.algo_args = QPlainTextEdit("\n".join(f"{k}: {v}" for k, v in cfg.miner.algo_args.items()))
+        self.algo_args.setPlaceholderText("poseidon2: --algorithm poseidon2 --pool ... --wallet ...\n"
+                                          "pearlhash: --algorithm pearlhash --pool ... --wallet ...")
+        self.algo_args.setToolTip("Аргументы майнера для каждой монеты, по строке на алгоритм. "
+                                  "Нужны мульти-калибровке, чтобы она сама переключала монеты.")
+        self.algo_args.setFixedHeight(70)
+        f.addRow("Аргументы по монетам", self.algo_args)
         col1.addWidget(miner)
 
         wd = QGroupBox("Watchdog")
@@ -109,12 +126,13 @@ class SettingsView(QWidget):
 
     def _save(self) -> None:
         cfg = self.runtime.cfg
-        old_miner = (cfg.miner.kind, cfg.miner.api_url, cfg.miner.executable, cfg.miner.args)
+        old_miner = (cfg.miner.kind, cfg.miner.api_url, cfg.miner.executable, cfg.miner.args, dict(cfg.miner.algo_args))
         cfg.miner.kind = self.kind.currentData()
         cfg.miner.api_url = self.api.text().strip()
         cfg.miner.executable = self.exe.text().strip()
         cfg.miner.args = self.args.text().strip()
         cfg.miner.algorithm = self.algorithm.text().strip() or cfg.miner.algorithm
+        cfg.miner.algo_args = parse_algo_args(self.algo_args.toPlainText())
         w = cfg.watchdog
         w.enabled = self.wd_enabled.isChecked()
         w.max_gpu_temp_c, w.max_hotspot_temp_c, w.max_vram_temp_c = self.t_gpu.value(), self.t_hot.value(), self.t_vram.value()
@@ -125,5 +143,6 @@ class SettingsView(QWidget):
         t.voltage_step_mv, t.min_voltage_offset_mv = self.v_step.value(), self.v_min.value()
         t.safety_margin_mv, t.max_hashrate_drop_pct = self.margin.value(), self.drop.value()
         save_config(cfg)
-        changed = old_miner != (cfg.miner.kind, cfg.miner.api_url, cfg.miner.executable, cfg.miner.args)
+        changed = old_miner != (cfg.miner.kind, cfg.miner.api_url, cfg.miner.executable, cfg.miner.args,
+                                cfg.miner.algo_args)
         self.note.setText("Сохранено." + (" Настройки майнера вступят в силу после перезапуска программы." if changed else ""))

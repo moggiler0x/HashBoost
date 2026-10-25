@@ -42,3 +42,32 @@ def test_best_tie_prefers_lower_power():
     b = BenchmarkSample("x", OcSettings(), 0, 90, True, revenue_per_day=19.98, cost_per_day=10)
     a.hashrate = b.hashrate = 1
     assert ProfitEngine.best([a, b]) is b
+
+
+def test_dual_tariff_effective_price():
+    cfg = AppConfig(tariff_mode="dual", tariff_day=10.64, tariff_night=4.85, psu_efficiency=1.0)
+    assert cfg.night_hours == 8
+    assert cfg.effective_tariff() == pytest.approx((10.64 * 16 + 4.85 * 8) / 24)
+    e = ProfitEngine(cfg)
+    assert e.cost_per_day(100) == pytest.approx(2.4 * cfg.effective_tariff())
+    cfg.tariff_mode = "single"
+    cfg.tariff_per_kwh = 8.9
+    assert e.cost_per_day(100) == pytest.approx(2.4 * 8.9)
+
+
+def test_night_only():
+    cfg = AppConfig(tariff_mode="dual", tariff_day=10, tariff_night=4, psu_efficiency=1.0, rig_base_power_w=0)
+    cfg.algorithms = {"a": AlgorithmConfig("a", unit="MH/s", revenue_per_unit_day=0.1, pool_fee_pct=0)}
+    e = ProfitEngine(cfg)
+    total = e.rig_total([("a", 300e6, 500)])  # доход 30, свет 12 кВт·ч * 8 = 96
+    night = e.night_only(total)
+    assert night.revenue_per_day == pytest.approx(10.0)
+    assert night.cost_per_day == pytest.approx(0.5 * 8 * 4)
+    assert night.net_per_day > total.net_per_day
+
+
+def test_payback():
+    from hashboost.core.profit import payback_days
+    assert payback_days(10000, 100) == pytest.approx(100)
+    assert payback_days(10000, -5) is None
+    assert payback_days(0, 10) == 0.0

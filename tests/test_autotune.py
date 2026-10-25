@@ -16,7 +16,9 @@ def test_autotune_improves_profit_and_finds_undervolt(rig, miner, cfg, clock, si
     result = tuner.run(0)
     assert result.final.stable
     assert result.final.net_per_day > result.baseline.net_per_day
-    assert result.final.settings.voltage_offset_mv < 0
+    # Андервольт: либо прямое снижение напряжения, либо сдвиг V/F-кривой вверх по частоте
+    # (та же частота на меньшем напряжении — так карта упирается в лимит мощности на большей частоте)
+    assert result.final.settings.voltage_offset_mv < 0 or result.final.settings.core_offset_mhz > 0
     assert result.final.settings.core_lock_mhz is not None
     assert rig[0].settings == result.final.settings
     # итоговые настройки не дают ошибок
@@ -28,7 +30,7 @@ def test_autotune_improves_profit_and_finds_undervolt(rig, miner, cfg, clock, si
 
 def test_safety_margin_applied(rig, miner, cfg, clock, sim):
     tuner = make_tuner(rig, miner, cfg, clock)
-    result = tuner.run(1)
+    result = tuner.run(4)  # RX 570: прямой андервольт через ADL
     uv_samples = [s for s in result.samples if s.phase == PHASES[3]]
     stable = [s.settings.voltage_offset_mv for s in uv_samples if s.stable]
     threshold = min(stable)

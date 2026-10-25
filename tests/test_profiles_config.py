@@ -26,3 +26,14 @@ def test_config_roundtrip(tmp_path):
     assert loaded.tariff_per_kwh == 4.5
     assert loaded.tuning.safety_margin_mv == 25
     assert loaded.algorithms["newalgo"].revenue_per_unit_day == 3
+
+
+def test_parse_algo_args():
+    pytest = __import__("pytest")
+    try:
+        from hashboost.gui.settings_view import parse_algo_args
+    except ImportError as exc:
+        pytest.skip(f"Qt недоступен: {exc}")
+    text = "poseidon2: --algorithm poseidon2 --pool stratum+tcp://a:1\n\nбез двоеточия\npearlhash:  -a pearl "
+    assert parse_algo_args(text) == {"poseidon2": "--algorithm poseidon2 --pool stratum+tcp://a:1",
+                                     "pearlhash": "-a pearl"}

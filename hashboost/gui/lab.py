@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QComboBox, QGroupBox, QHBoxLayout, QLabel, QMessa
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
 from ..core.autotune import PHASES, TuneCancelled, TuneFailed, TunerCallbacks, TuneResult
+from ..core.multitune import MultiTuneResult
 from ..core.runtime import Runtime
 from ..models import BenchmarkSample, format_hashrate
 from . import theme
@@ -18,7 +19,8 @@ class _Bridge(QObject):
     log = Signal(str)
     sample = Signal(object)
     phase = Signal(int, str)
-    finished = Signal(object, str)  # TuneResult | None, сообщение об ошибке
+    algorithm = Signal(int, str)
+    finished = Signal(object, str)  # TuneResult | MultiTuneResult | None, сообщение об ошибке
 
 
 class LabView(QWidget):
@@ -30,6 +32,9 @@ class LabView(QWidget):
         self.bridge.sample.connect(self._on_sample)
         self.bridge.phase.connect(self._on_phase)
         self.bridge.finished.connect(self._on_finished)
+        self.bridge.algorithm.connect(self._on_algorithm)
+        self._multi = False
+        self._current_algo = ""
         self._queue: list[int] = []
         self._thread: threading.Thread | None = None
         self.samples: list[BenchmarkSample] = []
@@ -42,6 +47,12 @@ class LabView(QWidget):
         for gpu in runtime.rig.gpus:
             self.gpu_box.addItem(gpu.label, gpu.index)
         top.addWidget(self.gpu_box, 1)
+        self.mode_box = QComboBox()
+        self.mode_box.addItem("Текущая монета", False)
+        self.mode_box.addItem("Все монеты — найти самую выгодную", True)
+        self.mode_box.setToolTip("Мульти-калибровка: карта калибруется на каждом алгоритме из калькулятора, "
+                                 "затем выбирается монета с максимальной чистой прибылью")
+        top.addWidget(self.mode_box)
         self.algo_label = QLabel()
         top.addWidget(self.algo_label)
         self.start_btn = QPushButton("Начать калибровку")
@@ -108,7 +119,16 @@ class LabView(QWidget):
         if self._thread and self._thread.is_alive():
             return
         choice = self.gpu_box.currentData()
+        self._multi = bool(self.mode_box.currentData())
+        if self._multi:
+            blocked = [a for a in self.runtime.cfg.algorithms if not self.runtime.can_switch_algorithm(a)]
+            if blocked:
+                QMessageBox.warning(self, "Мульти-калибровка",
+                                    "Чтобы сравнить монеты, HashBoost должен сам перезапускать майнер. Укажите в "
+                                    "настройках путь к майнеру и аргументы для: " + ", ".join(blocked))
+                return
         self._queue = [g.index for g in self.runtime.rig.gpus] if choice == -1 else [choice]
+        self._current_algo = ""
         self._update_algo()
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
@@ -130,7 +150,11 @@ class LabView(QWidget):
         self.log.appendPlainText("")
         callbacks = TunerCallbacks(on_log=self.bridge.log.emit, on_sample=self.bridge.sample.emit,
                                    on_phase=self.bridge.phase.emit)
-        tuner = self.runtime.make_tuner(callbacks)
+        if self._multi:
+            tuner = self.runtime.make_multi_tuner(list(self.runtime.cfg.algorithms), callbacks,
+                                                  on_algorithm=self.bridge.algorithm.emit)
+        else:
+            tuner = self.runtime.make_tuner(callbacks)
 
         def work():
             try:
@@ -146,6 +170,8 @@ class LabView(QWidget):
         self._thread.start()
 
     def _done(self) -> None:
+        if self._multi:
+            self._apply_best_rig_algorithm()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.runtime.watchdog.paused = False
@@ -155,8 +181,14 @@ class LabView(QWidget):
     def _on_log(self, msg: str) -> None:
         self.log.appendPlainText(msg)
 
+    def _on_algorithm(self, idx: int, name: str) -> None:
+        self._current_algo = f"{name} ({idx + 1}/{len(self.runtime.cfg.algorithms)}) · "
+        self.samples = []
+        self._redraw()
+        self._update_algo()
+
     def _on_phase(self, idx: int, name: str) -> None:
-        self.phase_label.setText(name)
+        self.phase_label.setText((self._current_algo if self._multi else "") + name)
         self.progress.setValue(idx)
 
     def _on_sample(self, sample: BenchmarkSample) -> None:
@@ -178,7 +210,39 @@ class LabView(QWidget):
         else:
             self.best_label.setText("")
 
-    def _on_finished(self, result: TuneResult | None, error: str) -> None:
+    def _apply_best_rig_algorithm(self) -> None:
+        """После мульти-калибровки переводит риг на монету, выгодную для рига в целом."""
+        best = self.runtime.best_rig_algorithm()
+        if not best:
+            return
+        algorithm, net = best
+        try:
+            self.runtime.apply_profiles(algorithm)
+        except Exception as exc:  # noqa: BLE001
+            self.log.appendPlainText(f"Не удалось переключить риг на {algorithm}: {exc}")
+            return
+        cur = self.runtime.cfg.currency
+        lines = [f"Риг переведён на {algorithm}: {net:.2f} {cur}/сут чистыми."]
+        for card in self.runtime.advice():
+            if card.best and card.best.algorithm != algorithm:
+                lines.append(f"  {self.runtime.rig[card.gpu.index].label} выгоднее на {card.best.coin} "
+                             f"(+{card.advantage():.2f} {cur}/сут) — для этого её нужно майнить отдельным майнером")
+        self.log.appendPlainText("\n".join(lines))
+        self._update_algo()
+
+    def _on_finished(self, result, error: str) -> None:
+        if isinstance(result, MultiTuneResult):
+            self.progress.setValue(len(PHASES))
+            cur = self.runtime.cfg.currency
+            for tr in result.results.values():
+                self.runtime.save_tune_result(tr)
+            best = result.best
+            if best is not None:
+                coin = self.runtime.cfg.algorithm(best.algorithm).coin or best.algorithm
+                self.log.appendPlainText(f"Самая выгодная монета для {self.runtime.rig[result.gpu_index].label}: "
+                                         f"{coin}, {best.final.net_per_day:.2f} {cur}/сут. Профили сохранены.")
+            self._next()
+            return
         if result is not None:
             self.progress.setValue(len(PHASES))
             profile = self.runtime.save_tune_result(result)

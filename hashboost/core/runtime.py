@@ -12,8 +12,11 @@ from ..clock import Clock, ScaledClock
 from ..config import AppConfig, data_dir
 from ..hardware import GpuBackendError, Rig, detect_backends
 from ..miners import MinerApiError, create_miner
+from ..miners.process import MinerProcess
 from ..models import GpuMinerStats, GpuTelemetry, MinerStats, OcSettings
+from .advisor import CardAdvice, advise, best_rig_algorithm
 from .autotune import AutoTuner, TunerCallbacks
+from .multitune import MultiAlgoTuner
 from .profiles import Profile, ProfileStore
 from .profit import ProfitBreakdown, ProfitEngine
 from .watchdog import HealthReport, Watchdog
@@ -61,7 +64,7 @@ class Runtime:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self.tuner: Optional[AutoTuner] = None
+        self.tuner: Optional[AutoTuner | MultiAlgoTuner] = None
 
     # --- события ---
     def _event(self, msg: str) -> None:
@@ -137,6 +140,30 @@ class Runtime:
         with self._lock:
             return self.snapshot
 
+    # --- алгоритм майнера ---
+    def can_switch_algorithm(self, algorithm: str) -> bool:
+        """Можно ли сменить монету без участия пользователя."""
+        if algorithm == self.algorithm or self.sim is not None:
+            return True
+        return isinstance(self.controller, MinerProcess) and bool(self.cfg.miner.algo_args.get(algorithm))
+
+    def switch_algorithm(self, algorithm: str) -> None:
+        """Перезапускает майнер на другом алгоритме.
+
+        Реальный майнер перезапускается с аргументами из ``miner.algo_args[algorithm]``;
+        если HashBoost не управляет процессом майнера, сменить монету он не может."""
+        if algorithm == self.algorithm and (self.sim is None or self.sim.algorithm == algorithm):
+            return
+        if self.sim is not None:
+            self.sim.restart_miner(algorithm)
+        elif isinstance(self.controller, MinerProcess) and self.cfg.miner.algo_args.get(algorithm):
+            self.controller.args = self.cfg.miner.algo_args[algorithm]
+            self.controller.restart()
+        else:
+            raise RuntimeError(f"укажите в настройках путь к майнеру и аргументы для «{algorithm}»")
+        self.cfg.miner.algorithm = algorithm
+        self._event(f"Майнер переключён на {algorithm}")
+
     # --- профили ---
     def apply_profiles(self, algorithm: str) -> list[str]:
         """Применяет сохранённые профили алгоритма ко всем картам (без профиля — сток)."""
@@ -147,16 +174,34 @@ class Runtime:
             self.rig.apply(gpu.index, settings)
             self.watchdog.mark_stable(gpu.index, settings)
             applied.append(f"{gpu.label}: {settings.describe()}")
-        self.cfg.miner.algorithm = algorithm
-        if self.sim is not None:
-            self.sim.restart_miner(algorithm)
+        if self.can_switch_algorithm(algorithm):
+            self.switch_algorithm(algorithm)
+        else:
+            self.cfg.miner.algorithm = algorithm
         self._event(f"Профиль «{algorithm}» применён")
         return applied
 
+    def _new_tuner(self, algorithm: str, callbacks: TunerCallbacks) -> AutoTuner:
+        return AutoTuner(self.rig, self.miner, self.controller, self.profit, self.cfg.tuning,
+                         self.cfg.watchdog, algorithm, self.clock, callbacks)
+
     def make_tuner(self, callbacks: TunerCallbacks) -> AutoTuner:
-        self.tuner = AutoTuner(self.rig, self.miner, self.controller, self.profit, self.cfg.tuning,
-                               self.cfg.watchdog, self.algorithm, self.clock, callbacks)
+        self.tuner = self._new_tuner(self.algorithm, callbacks)
         return self.tuner
+
+    def make_multi_tuner(self, algorithms: list[str], callbacks: TunerCallbacks,
+                         on_algorithm=lambda idx, name: None) -> MultiAlgoTuner:
+        self.tuner = MultiAlgoTuner(algorithms, lambda a: self._new_tuner(a, callbacks), self.switch_algorithm,
+                                    self.clock, callbacks, settle_s=self.cfg.tuning.warmup_s,
+                                    on_algorithm=on_algorithm)
+        return self.tuner
+
+    def advice(self) -> list[CardAdvice]:
+        """Самая выгодная монета и окупаемость для каждой карты при текущих тарифе и доходности."""
+        return advise(self.cfg, self.profit, [g.info for g in self.rig.gpus], self.profiles)
+
+    def best_rig_algorithm(self):
+        return best_rig_algorithm(self.advice())
 
     def save_tune_result(self, result) -> Profile:
         gpu = self.rig[result.gpu_index]
