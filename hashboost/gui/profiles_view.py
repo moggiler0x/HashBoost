@@ -37,6 +37,7 @@ class ProfilesView(QWidget):
         self.table.setHorizontalHeaderLabels(["GPU", "Алгоритм", "Настройки", "Хешрейт", "Вт",
                                               f"Чистыми {cur}/сут", "Создан"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
