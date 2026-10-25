@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hashboost"
+version = "0.1.0"
+description = "Авто-андервольтинг, разгон и оптимизация доходности видеокарт с учётом цены электроэнергии"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.6",
+    "pyqtgraph>=0.13.3",
+    "nvidia-ml-py>=12.535; sys_platform != 'darwin'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+hashboost = "hashboost.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["hashboost*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
